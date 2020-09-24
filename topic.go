@@ -3,12 +3,12 @@ package main
 import (
     "fmt"
     "strings"
-	"encoding/json"
-	"net/http"
+    "encoding/json"
+    "net/http"
     "sync"
     "bytes"
     "log"
-	"io/ioutil"
+    "io/ioutil"
 )
 
 type Subscriber struct {
