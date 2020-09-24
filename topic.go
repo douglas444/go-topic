@@ -2,16 +2,107 @@ package main
 
 import (
     "fmt"
-    "net/http"
+    "strings"
+	"encoding/json"
+	"net/http"
+    "sync"
 )
 
+type Message struct {
+    TextContent string `json:"textContent"`
+}
 
-func serverStart(exit chan bool) {
-    
-    http.HandleFunc("/exit", func(w http.ResponseWriter, req *http.Request) {
-        fmt.Println("exiting");
-        w.WriteHeader(202);
-        exit <- true;
+type Subscriber struct {
+    Endpoint string `json:"endpoint"`
+}
+
+func notify(subscribers []Subscriber, message Message) {
+    for _, subscriber := range subscribers {
+        fmt.Println("sending [", message.TextContent, "] to [", subscriber.Endpoint, "]");
+    }
+}
+
+func find(slice []Subscriber, value Subscriber) (int, bool) {
+    for i, item := range slice {
+        if item.Endpoint == value.Endpoint {
+            return i, true
+        }
+    }
+    return -1, false
+}
+
+func serverStart(subscribersByTopic map[string][]Subscriber) {
+
+    var mutex sync.RWMutex;
+
+    http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+        fmt.Fprintf(w, "no one's around to help");
+    });
+
+    http.HandleFunc("/write/", func(w http.ResponseWriter, r *http.Request) {
+
+        if r.Body == nil {
+            http.Error(w, "request body is missing", 400);
+            return;
+        }
+
+        var message Message;
+
+        err := json.NewDecoder(r.Body).Decode(&message)
+        if err != nil {
+            http.Error(w, "invalid request body", 400);
+            return;
+        }
+
+        if (message.TextContent == "") {
+            http.Error(w, "textContent field cannot be empty", 400);
+            return;
+        }
+
+        topic := strings.TrimPrefix(r.URL.Path, "/write/")
+
+        mutex.RLock();
+        subscribers := subscribersByTopic[topic];
+        mutex.RUnlock();
+
+        notify(subscribers, message);
+
+    });
+
+    http.HandleFunc("/subscribe/", func(w http.ResponseWriter, r *http.Request) {
+
+        if r.Body == nil {
+            http.Error(w, "request body is missing", 400);
+            return;
+        }
+
+        var subscriber Subscriber;
+        err := json.NewDecoder(r.Body).Decode(&subscriber)
+        if err != nil {
+            http.Error(w, "request body is missing", 400);
+            return;
+        }
+
+        if (subscriber.Endpoint == "") {
+            http.Error(w, "endpoint field cannot be empty", 400);
+            return;
+        }
+
+        topic := strings.TrimPrefix(r.URL.Path, "/subscribe/");
+
+        mutex.Lock();
+
+        if _, contains := subscribersByTopic[topic]; !contains {
+            subscribersByTopic[topic] = make([]Subscriber, 0);
+        }
+
+        if _, contains := find(subscribersByTopic[topic], subscriber); !contains {
+            subscribersByTopic[topic] = append(subscribersByTopic[topic], subscriber);
+        } else {
+            http.Error(w, "already subscribed to this topic", 400);
+        }
+        mutex.Unlock();
+
     });
 
     http.ListenAndServe(":8080", nil);
@@ -19,8 +110,11 @@ func serverStart(exit chan bool) {
 }
 
 func main() {
-    exit := make(chan bool);
-    go serverStart(exit);
+
+    topics := make(map[string][]Subscriber);
+    go serverStart(topics);
     fmt.Println("running on 8080");
-    <- exit;
+
+    c := make(chan int)
+    <- c
 }
