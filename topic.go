@@ -6,19 +6,22 @@ import (
 	"encoding/json"
 	"net/http"
     "sync"
+    "bytes"
+    "log"
+	"io/ioutil"
 )
-
-type Message struct {
-    TextContent string `json:"textContent"`
-}
 
 type Subscriber struct {
     Endpoint string `json:"endpoint"`
 }
 
-func notify(subscribers []Subscriber, message Message) {
+func notify(subscribers []Subscriber, body []byte) {
     for _, subscriber := range subscribers {
-        fmt.Println("sending [", message.TextContent, "] to [", subscriber.Endpoint, "]");
+        res, err := http.Post(subscriber.Endpoint, "application/json", bytes.NewReader(body));
+        if err != nil {
+            log.Println(err);
+        }
+        res.Body.Close();
     }
 }
 
@@ -46,16 +49,9 @@ func serverStart(subscribersByTopic map[string][]Subscriber) {
             return;
         }
 
-        var message Message;
-
-        err := json.NewDecoder(r.Body).Decode(&message)
+        body, err := ioutil.ReadAll(r.Body)
         if err != nil {
             http.Error(w, "invalid request body", 400);
-            return;
-        }
-
-        if (message.TextContent == "") {
-            http.Error(w, "textContent field cannot be empty", 400);
             return;
         }
 
@@ -65,7 +61,7 @@ func serverStart(subscribersByTopic map[string][]Subscriber) {
         subscribers := subscribersByTopic[topic];
         mutex.RUnlock();
 
-        notify(subscribers, message);
+        go notify(subscribers, body);
 
     });
 
@@ -79,7 +75,7 @@ func serverStart(subscribersByTopic map[string][]Subscriber) {
         var subscriber Subscriber;
         err := json.NewDecoder(r.Body).Decode(&subscriber)
         if err != nil {
-            http.Error(w, "request body is missing", 400);
+            http.Error(w, "invalid request body", 400);
             return;
         }
 
